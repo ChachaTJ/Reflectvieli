@@ -1,14 +1,79 @@
 // background.js
 import CONFIG from './config.js';
 
+// 패널 상태를 storage에서 가져오거나 설정하는 함수
+async function getPanelState() {
+  const result = await chrome.storage.local.get('panelState');
+  return result.panelState || false;
+}
+
+async function setPanelState(isOpen) {
+  await chrome.storage.local.set({ panelState: isOpen });
+}
+
+// 단축키 명령어 리스너
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command === "toggle-sidepanel") {
+    try {
+      const isOpen = await getPanelState();
+      
+      if (!isOpen) {
+        // 패널이 닫혀있을 때 열기
+        await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+        await chrome.sidePanel.setOptions({
+          path: 'sidepanel.html',
+          enabled: true
+        });
+        await setPanelState(true);
+      } else {
+        // 패널이 열려있을 때 닫기
+        await chrome.sidePanel.setOptions({ enabled: false });
+        await setPanelState(false);
+      }
+    } catch (error) {
+      console.error('Error handling command:', error);
+    }
+  }
+});
+
+// 확장프로그램 아이콘 클릭 리스너
+chrome.action.onClicked.addListener(async () => {
+  try {
+    const isOpen = await getPanelState();
+    
+    if (!isOpen) {
+      await chrome.sidePanel.setOptions({
+        path: 'sidepanel.html',
+        enabled: true
+      });
+      await setPanelState(true);
+    } else {
+      await chrome.sidePanel.setOptions({ enabled: false });
+      await setPanelState(false);
+    }
+  } catch (error) {
+    console.error('Error handling click:', error);
+  }
+});
+
+// 초기 설정
 chrome.runtime.onInstalled.addListener(async () => {
-  // 사이드패널 자동 열림 설정
-  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  
-  // 로컬 스토리지 초기화
-  await chrome.storage.local.set({ 
-    [CONFIG.STORAGE_KEYS.feedbackHistory]: [] 
-  });
+  try {
+    // 초기 상태 설정
+    await setPanelState(false);
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    await chrome.sidePanel.setOptions({ 
+      enabled: false,
+      path: 'sidepanel.html'
+    });
+    
+    // 로컬 스토리지 초기화
+    await chrome.storage.local.set({ 
+      [CONFIG.STORAGE_KEYS.feedbackHistory]: [] 
+    });
+  } catch (error) {
+    console.error('Error in onInstalled:', error);
+  }
 });
 
 // 오프라인 피드백 동기화 처리
@@ -23,8 +88,6 @@ function startSyncInterval() {
   
   syncInterval = setInterval(async () => {
     try {
-      if (!navigator.onLine) return;
-      
       const { feedbackHistory } = await chrome.storage.local.get(
         CONFIG.STORAGE_KEYS.feedbackHistory
       );
@@ -72,5 +135,28 @@ chrome.runtime.onSuspend.addListener(() => {
   if (syncInterval) {
     clearInterval(syncInterval);
     syncInterval = null;
+  }
+});
+
+// 사이드패널이 닫힐 때 상태 업데이트
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'sidepanel') {
+    port.onDisconnect.addListener(async () => {
+      await setPanelState(false);
+      await chrome.sidePanel.setOptions({ enabled: false });
+    });
+  }
+});
+
+// 탭 변경 시 패널 상태 확인 및 유지
+chrome.tabs.onActivated.addListener(async () => {
+  try {
+    const isOpen = await getPanelState();
+    await chrome.sidePanel.setOptions({
+      enabled: isOpen,
+      path: isOpen ? 'sidepanel.html' : ''
+    });
+  } catch (error) {
+    console.error('Error in tab change:', error);
   }
 });

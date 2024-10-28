@@ -11,6 +11,44 @@ async function setPanelState(isOpen) {
   await chrome.storage.local.set({ panelState: isOpen });
 }
 
+// 피드백 툴바 토글 함수
+async function toggleFeedbackToolbar() {
+  try {
+    const isOpen = await getPanelState();
+
+    if (!isOpen) {
+      // 툴바가 닫혀있을 때 열기
+      // 콘텐츠 스크립트를 통해 툴바 표시
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab.id) {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['contentScript.js']
+        });
+      }
+      await setPanelState(true);
+    } else {
+      // 툴바가 열려있을 때 닫기
+      // 콘텐츠 스크립트를 통해 툴바 제거
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab.id) {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const toolbar = document.getElementById('feedback-toolbar');
+            if (toolbar) {
+              toolbar.remove();
+            }
+          }
+        });
+      }
+      await setPanelState(false);
+    }
+  } catch (error) {
+    console.error('Error handling toggleFeedbackToolbar:', error);
+  }
+}
+
 // 단축키 명령어 리스너
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === "toggle-sidepanel") {

@@ -69,22 +69,54 @@ class FeedbackPanel {
       this.showNotification('피드백 이모지를 선택해주세요.', 'error');
       return;
     }
-
+  
     const feedback = {
       type: this.selectedEmoji,
       emoji: CONFIG.EMOTIONS[this.selectedEmoji].emoji,
       text: this.feedbackInput.value.trim(),
       timestamp: new Date().toISOString(),
-      pending: true  // 모든 피드백을 일단 pending 상태로 저장
+      pending: true
     };
-
+  
     try {
+      // confused나 repeat 상태일 때 Engageli 하트 반응 전송
+      if (this.selectedEmoji === 'confused' || this.selectedEmoji === 'repeat') {
+        try {
+          const [tab] = await chrome.tabs.query({ 
+            active: true, 
+            url: "*://*.engageli.com/*" 
+          });
+          
+          if (tab?.id) {
+            // content script 재주입
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ['contentScript.js']
+            });
+  
+            // 약간의 지연을 주어 content script가 로드될 시간을 줌
+            await new Promise(resolve => setTimeout(resolve, 100));
+  
+            // 메시지 전송
+            const response = await chrome.tabs.sendMessage(tab.id, {
+              type: 'sendEngageliReaction'
+            });
+  
+            if (!response?.success) {
+              console.warn('Engageli 반응 전송 실패');
+            }
+          }
+        } catch (error) {
+          console.error('Failed to send Engageli reaction:', error);
+        }
+      }
+  
       // 로컬 스토리지에 저장
       await this.saveFeedbackLocally(feedback);
       
       this.resetUI();
       this.showNotification(
-        this.isOnline ? '피드백이 저장되었습니다.' : '피드백이 오프라인에 저장되었습니다.',
+        '피드백이 저장되었습니다.',
         'success'
       );
       this.loadFeedbackHistory();

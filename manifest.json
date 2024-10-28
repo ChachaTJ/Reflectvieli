@@ -8,8 +8,25 @@
     "storage",
     "activeTab",
     "sidePanel",
-    "windows"
+    "windows",
+    "scripting",
+    "commands",
+    "offscreen"
   ],
+  
+  "host_permissions": [
+    "https://*.engageli.com/*/current/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.engageli.com/*/current/*"
+      ],
+      "js": ["contentScript.js"],
+      "run_at": "document_end",
+      "all_frames": true}
+    ],
+  
   "action": {
     "default_icon": {
       "16": "images/icon-16.png",

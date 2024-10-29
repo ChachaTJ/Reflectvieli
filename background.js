@@ -18,7 +18,6 @@ async function toggleFeedbackToolbar() {
 
     if (!isOpen) {
       // 툴바가 닫혀있을 때 열기
-      // 콘텐츠 스크립트를 통해 툴바 표시
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab.id) {
         await chrome.scripting.executeScript({
@@ -29,7 +28,6 @@ async function toggleFeedbackToolbar() {
       await setPanelState(true);
     } else {
       // 툴바가 열려있을 때 닫기
-      // 콘텐츠 스크립트를 통해 툴바 제거
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab.id) {
         await chrome.scripting.executeScript({
@@ -198,3 +196,50 @@ chrome.tabs.onActivated.addListener(async () => {
     console.error('Error in tab change:', error);
   }
 });
+
+// Background Script에서 메시지 수신
+chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+  if (message.type === 'sendFeedback') {
+    try {
+      // 피드백 로컬 스토리지에 저장
+      await saveFeedbackToLocalStorage(message.feedback);
+
+      // Side Panel에 히스토리 갱신 요청
+      try {
+        await chrome.runtime.sendMessage({ type: 'updateHistory' });
+      } catch (err) {
+        console.log('Side panel not available:', err);
+      }
+
+      sendResponse({ success: true });
+    } catch (error) {
+      console.error('Failed to save feedback:', error);
+      sendResponse({ success: false, error: error.message });
+    }
+    return true; // 비동기 응답을 위해 true 반환
+  }
+});
+
+// 피드백을 로컬 스토리지에 저장하는 함수
+async function saveFeedbackToLocalStorage(feedback) {
+  try {
+    const { feedbackHistory = [] } = await chrome.storage.local.get('feedbackHistory');
+    
+    // 새 피드백을 배열의 시작에 추가
+    feedbackHistory.unshift({
+      ...feedback,
+      pending: true
+    });
+
+    // 최대 50개까지만 유지
+    if (feedbackHistory.length > 50) {
+      feedbackHistory.pop();
+    }
+
+    await chrome.storage.local.set({ feedbackHistory });
+    return true;
+  } catch (error) {
+    console.error('Error saving feedback:', error);
+    throw error;
+  }
+}

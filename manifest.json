@@ -14,14 +14,11 @@
     "offscreen"
   ],
   
-  "host_permissions": [
-    "https://*.engageli.com/*/current/*"
-  ],
+
+  "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {
-      "matches": [
-        "https://*.engageli.com/*/current/*"
-      ],
+      "matches": ["<all_urls>"],
       "js": ["contentScript.js"],
       "run_at": "document_end",
       "all_frames": true}

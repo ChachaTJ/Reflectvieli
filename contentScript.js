@@ -1,205 +1,301 @@
 // contentScript.js
 (function() {
-  // 이미 로드된 경우 중복 실행 방지
   if (window.hasOwnProperty('engageliContentScriptLoaded')) {
     return;
   }
   window.engageliContentScriptLoaded = true;
 
-  // 디바운스 함수
-  let reactionTimeout = null;
-  
-  // Engageli 반응 함수
-  function sendEngageliReaction() {
-    return new Promise(async (resolve) => {
-      try {
-        // 이전 타이머가 있다면 취소
-        if (reactionTimeout) {
-          clearTimeout(reactionTimeout);
-        }
-
-        // 새로운 타이머 설정
-        reactionTimeout = setTimeout(async () => {
-          // 1. 반응 버튼 찾기
-          const reactionButton = document.querySelector('[data-testid="reaction-button"]');
-          if (!reactionButton) {
-            console.error("반응 버튼을 찾을 수 없습니다.");
-            resolve(false);
-            return;
-          }
-          
-          // 2. 반응 버튼 클릭
-          reactionButton.click();
-          
-          // 3. 하트 이모티콘 클릭
-          setTimeout(() => {
-            const heartButton = document.querySelector('[aria-label="Purple heart"]');
-            if (heartButton) {
-              heartButton.click();
-              console.log("하트 반응 전송 완료");
-              resolve(true);
-            } else {
-              console.error("하트 버튼을 찾을 수 없습니다.");
-              resolve(false);
-            }
-          }, 500);
-        }, 100); // 디바운스 대기 시간
-      } catch (error) {
-        console.error("Engageli 반응 전송 실패:", error);
-        resolve(false);
+  // 스타일 추가
+  function addStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+      .engageli-popup {
+        position: fixed;
+        bottom: 80px;
+        right: 20px;
+        width: 300px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        z-index: 9999;
+        padding: 16px;
+        display: none;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       }
-    });
+
+      .engageli-popup-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+
+      .engageli-popup-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1F2937;
+      }
+
+      .engageli-popup-close {
+        background: none;
+        border: none;
+        color: #6B7280;
+        cursor: pointer;
+        padding: 4px;
+        font-size: 18px;
+      }
+
+      .engageli-emoji-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .engageli-emoji-button {
+        display: flex;
+        align-items: center;
+        padding: 8px 12px;
+        background: #F8F9FA;
+        border: 1px solid #E5E7EB;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .engageli-emoji-button:hover {
+        border-color: #0066FF;
+        background: rgba(0, 102, 255, 0.05);
+      }
+
+      .engageli-emoji-button.active {
+        background: rgba(0, 102, 255, 0.1);
+        border-color: #0066FF;
+      }
+
+      .engageli-emoji-button span {
+        margin-left: 8px;
+        font-size: 14px;
+        color: #6B7280;
+      }
+
+      .engageli-input {
+        width: 100%;
+        padding: 8px 12px;
+        background: #F8F9FA;
+        border: 1px solid #E5E7EB;
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 14px;
+        resize: vertical;
+        min-height: 60px;
+        margin-bottom: 12px;
+      }
+
+      .engageli-input:focus {
+        outline: none;
+        border-color: #0066FF;
+        box-shadow: 0 0 0 2px rgba(0, 102, 255, 0.1);
+      }
+
+      .engageli-send-button {
+        width: 100%;
+        padding: 8px 16px;
+        background: #0066FF;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+
+      .engageli-send-button:hover {
+        background: #0052CC;
+      }
+    `;
+    document.head.appendChild(style);
   }
 
-  // 메시지 리스너 (한 번만 등록)
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log("Received message:", message);
+  function createPopup() {
+    const popup = document.createElement('div');
+    popup.className = 'engageli-popup';
+    popup.innerHTML = `
+      <div class="engageli-popup-header">
+        <div class="engageli-popup-title">피드백 보내기</div>
+        <button class="engageli-popup-close" aria-label="닫기">✕</button>
+      </div>
+      <div class="engageli-emoji-grid">
+        <button class="engageli-emoji-button" data-mood="understand">
+          😊 <span>Understood</span>
+        </button>
+        <button class="engageli-emoji-button" data-mood="question">
+          ❓ <span>Question</span>
+        </button>
+        <button class="engageli-emoji-button" data-mood="confused">
+          😐 <span>Confused</span>
+        </button>
+        <button class="engageli-emoji-button" data-mood="repeat">
+          🔄 <span>Repeat</span>
+        </button>
+      </div>
+      <textarea
+        class="engageli-input"
+        placeholder="추가 피드백이 있다면 입력해주세요 (선택사항)"
+        maxlength="500"
+      ></textarea>
+      <button class="engageli-send-button">피드백 보내기</button>
+    `;
+
+    document.body.appendChild(popup);
     
-    if (message.type === 'sendEngageliReaction') {
-      sendEngageliReaction().then(success => {
-        console.log("Reaction sent:", success);
-        sendResponse({ success });
-      });
-      return true;  // 비동기 응답을 위해 true 반환
-    }
-  });
-
-  console.log('Content script loaded (once)');
-})();
-
-// 피드백 전송 이벤트 리스너 수정
-feedbackToolbar.querySelector('#send-feedback').addEventListener('click', async () => {
-  const selectedEmoji = feedbackToolbar.querySelector('.emoji-button.active')?.dataset.mood;
-  const feedbackText = feedbackToolbar.querySelector('.feedback-input').value.trim();
-
-  if (!selectedEmoji) {
-    alert('피드백 이모지를 선택해주세요.');
-    return;
-  }
-
-  // confused나 repeat 상태일 때 Engageli 하트 반응 전송
-  if (selectedEmoji === 'confused' || selectedEmoji === 'repeat') {
-    await sendEngageliReaction();
-  }
-
-  // 피드백 메시지 전송 (기존 코드)
-  chrome.runtime.sendMessage({
-    type: 'sendFeedback',
-    feedback: {
-      type: selectedEmoji,
-      emoji: CONFIG.EMOTIONS[selectedEmoji].emoji,
-      text: feedbackText,
-      timestamp: new Date().toISOString(),
-      pending: !navigator.onLine
-    }
-  }, (response) => {
-    if (response.status === 'success') {
-      alert(response.message);
-      feedbackToolbar.querySelector('.feedback-input').value = '';
-      emojiButtons.forEach(b => b.classList.remove('active'));
-    } else if (response.status === 'warning') {
-      alert(response.message);
-      feedbackToolbar.querySelector('.feedback-input').value = '';
-      emojiButtons.forEach(b => b.classList.remove('active'));
-    } else {
-      alert(`오류: ${response.message}`);
-    }
-  });
-});
-
-(function() {
-    // 기존에 삽입된 피드백 바가 있는지 확인
-    if (document.getElementById('feedback-toolbar')) return;
-  
-    // 피드백 바 컨테이너 생성
-    const toolbar = document.createElement('div');
-    toolbar.id = 'feedback-toolbar';
-    toolbar.style.position = 'fixed';
-    toolbar.style.bottom = '0';
-    toolbar.style.left = '0';
-    toolbar.style.width = '100%';
-    toolbar.style.backgroundColor = '#f1f1f1';
-    toolbar.style.borderTop = '1px solid #ccc';
-    toolbar.style.padding = '5px';
-    toolbar.style.display = 'flex';
-    toolbar.style.justifyContent = 'space-between';
-    toolbar.style.alignItems = 'center';
-    toolbar.style.zIndex = '10000'; // 페이지 콘텐츠 위에 표시
-  
-    // 이모지 버튼들
-    const emojiContainer = document.createElement('div');
-  
-    const emojis = ['😊', '😐', '😢'];
-    emojis.forEach(emoji => {
-      const button = document.createElement('button');
-      button.textContent = emoji;
-      button.style.fontSize = '20px';
-      button.style.marginRight = '5px';
-      button.style.background = 'none';
-      button.style.border = 'none';
-      button.style.cursor = 'pointer';
-      button.dataset.mood = emoji === '😊' ? 'happy' : (emoji === '😐' ? 'neutral' : 'sad');
-      emojiContainer.appendChild(button);
-    });
-  
-    // 피드백 입력창
-    const feedbackInput = document.createElement('textarea');
-    feedbackInput.id = 'feedback-input';
-    feedbackInput.placeholder = '피드백을 입력하세요...';
-    feedbackInput.style.flex = '1';
-    feedbackInput.style.marginRight = '5px';
-    feedbackInput.style.height = '30px';
-    feedbackInput.style.resize = 'none';
-  
-    // 피드백 전송 버튼
-    const sendButton = document.createElement('button');
-    sendButton.id = 'send-feedback';
-    sendButton.textContent = '보내기';
-    sendButton.style.padding = '5px 10px';
-    sendButton.style.cursor = 'pointer';
-  
-    // 피드백 바에 요소 추가
-    toolbar.appendChild(emojiContainer);
-    toolbar.appendChild(feedbackInput);
-    toolbar.appendChild(sendButton);
-  
-    // 페이지에 피드백 바 삽입
-    document.body.appendChild(toolbar);
-  
     // 이벤트 리스너 추가
-    sendButton.addEventListener('click', () => {
-      const selectedEmoji = toolbar.querySelector('.emoji-button.active')?.dataset.mood;
-      const feedbackText = feedbackInput.value.trim();
-  
+    const closeBtn = popup.querySelector('.engageli-popup-close');
+    closeBtn.addEventListener('click', () => {
+      popup.style.display = 'none';
+    });
+
+    // 이모지 버튼 이벤트
+    const emojiButtons = popup.querySelectorAll('.engageli-emoji-button');
+    let selectedEmoji = null;
+
+    emojiButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        emojiButtons.forEach(b => b.classList.remove('active'));
+        button.classList.add('active');
+        selectedEmoji = button.dataset.mood;
+      });
+    });
+
+    // 전송 버튼 이벤트
+    const sendButton = popup.querySelector('.engageli-send-button');
+    const textarea = popup.querySelector('.engageli-input');
+
+    sendButton.addEventListener('click', async () => {
       if (!selectedEmoji) {
         alert('이모지를 선택해주세요.');
         return;
       }
-  
-      // 메시지 보내기 (백그라운드 또는 팝업과 통신)
-      chrome.runtime.sendMessage({
-        type: 'sendFeedback',
-        feedback: {
-          type: selectedEmoji,
-          emoji: selectedEmoji === 'happy' ? '😊' : (selectedEmoji === 'neutral' ? '😐' : '😢'),
-          text: feedbackText,
-          timestamp: new Date().toISOString(),
-          userAgent: navigator.userAgent
+
+      const feedback = {
+        type: selectedEmoji,
+        text: textarea.value.trim(),
+        timestamp: new Date().toISOString(),
+        emoji: getEmojiForType(selectedEmoji),
+        pending: true
+      };
+
+      // Background Script로 메시지 전송
+      chrome.runtime.sendMessage({ 
+        type: 'sendFeedback', 
+        feedback 
+      }, (response) => {
+        if (response?.success) {
+          console.log('Feedback sent and saved successfully.');
+          
+          // UI 초기화 및 팝업 닫기
+          textarea.value = '';
+          selectedEmoji = null;
+          emojiButtons.forEach(b => b.classList.remove('active'));
+          popup.style.display = 'none';
         }
       });
-  
-      // 입력 초기화
-      feedbackInput.value = '';
-      toolbar.querySelectorAll('.emoji-button').forEach(b => b.classList.remove('active'));
+
+      if (selectedEmoji === 'confused' || selectedEmoji === 'repeat') {
+        const reactionButton = document.querySelector('[data-testid="reaction-button"]');
+        if (reactionButton) {
+          reactionButton.click();
+          setTimeout(() => {
+            const heartButton = document.querySelector('[aria-label="Purple heart"]');
+            if (heartButton) {
+              heartButton.click();
+            }
+          }, 500);
+        }
+      }
     });
-  
-    // 이모지 버튼 클릭 이벤트
-    toolbar.querySelectorAll('.emoji-button').forEach(button => {
-      button.addEventListener('click', () => {
-        toolbar.querySelectorAll('.emoji-button').forEach(b => b.classList.remove('active'));
-        button.classList.add('active');
-      });
+
+    // 외부 클릭 시 닫기
+    document.addEventListener('click', (e) => {
+      if (!popup.contains(e.target) && 
+          !document.getElementById('engageli-understand-button').contains(e.target)) {
+        popup.style.display = 'none';
+      }
     });
-  
-  })();
-  
+
+    return popup;
+  }
+
+  function getEmojiForType(type) {
+    const emojiMap = {
+      understand: '😊',
+      question: '❓',
+      confused: '😐',
+      repeat: '🔄'
+    };
+    return emojiMap[type] || '❔';
+  }
+
+  function createUnderstandButton() {
+    const existingButton = document.getElementById('engageli-understand-button');
+    if (existingButton) {
+      existingButton.remove();
+    }
+
+    const chatButton = document.querySelector('#open-chat-button');
+    if (!chatButton) return;
+
+    const button = document.createElement('button');
+    button.id = 'engageli-understand-button';
+    button.className = chatButton.className;
+    button.setAttribute('aria-label', 'Feedback');
+
+    const boxDiv = document.createElement('div');
+    boxDiv.className = 'MuiBox-root css-1tdgbex';
+
+    const span = document.createElement('span');
+    span.className = 'MuiBadge-root css-1rzb3uu';
+    span.setAttribute('aria-hidden', 'true');
+
+    const emoji = document.createElement('div');
+    emoji.style.fontSize = '28px';
+    emoji.textContent = '🤔';
+
+    const text = document.createElement('p');
+    text.className = 'MuiTypography-root MuiTypography-body2 jss618 css-1tllh4l';
+    text.textContent = 'Feedback';
+
+    span.appendChild(emoji);
+    boxDiv.appendChild(span);
+    boxDiv.appendChild(text);
+    button.appendChild(boxDiv);
+
+    // 클릭 이벤트
+    let popup = document.querySelector('.engageli-popup');
+    button.addEventListener('click', () => {
+      if (!popup) {
+        popup = createPopup();
+      }
+      popup.style.display = popup.style.display === 'none' ? 'block' : 'none';
+    });
+
+    chatButton.parentNode.insertBefore(button, chatButton.nextSibling);
+  }
+
+  // 초기화 코드
+  addStyles();
+  createUnderstandButton();
+
+  // MutationObserver 설정
+  const observer = new MutationObserver((mutations) => {
+    if (!document.getElementById('engageli-understand-button')) {
+      createUnderstandButton();
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+})();
